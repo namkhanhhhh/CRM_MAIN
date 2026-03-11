@@ -77,6 +77,7 @@ const menuItems: MenuItem[] = [
       { label: "Dữ liệu chung", path: "/sales/data" },
       { label: "Công nợ", path: "/sales/debt" },
       { label: "Dashboard doanh thu", path: "/sales/dashboard" },
+      { label: "Hoa hồng", path: "/sales/commissions" },
     ],
   },
   {

@@ -23,6 +23,7 @@ import CandidateApplyPage from "./pages/CandidateApplyPage";
 import AccountingDataPage from "./pages/AccountingDataPage";
 import AccountingDebtPage from "./pages/AccountingDebtPage";
 import AccountingDashboardPage from "./pages/AccountingDashboardPage";
+import CommissionsPage from "./pages/CommissionsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -55,6 +56,7 @@ const App = () => (
               <Route path="/sales/data" element={<AccountingDataPage />} />
               <Route path="/sales/debt" element={<AccountingDebtPage />} />
               <Route path="/sales/dashboard" element={<AccountingDashboardPage />} />
+              <Route path="/sales/commissions" element={<CommissionsPage />} />
               {/* Candidate Apply Page (Public) */}
               <Route path="/apply/:headhunterSlug/:jobCode" element={<CandidateApplyPage />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

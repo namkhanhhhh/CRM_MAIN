@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { AddDebtDialog } from '@/components/accounting/AddDebtDialog';
 import { EditDebtDialog } from '@/components/accounting/EditDebtDialog';
 import { exportDebtToExcel } from '@/lib/exportDebtToExcel';
+import { toast } from 'sonner';
 
 const formatVND = (n: number) => new Intl.NumberFormat('vi-VN').format(Math.round(n)) + ' ₫';
 const formatDate = (d: string | null | undefined) => d || '—';
@@ -55,6 +56,7 @@ export default function AccountingDebtPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<AccountingRecord | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
 
   const updateNote = (id: string, note: string) => {
     setRecords(prev => prev.map(r => r.id === id ? { ...r, note } : r));
@@ -109,11 +111,20 @@ export default function AccountingDebtPage() {
 
   const isCompanyPartial = (company: CompanyDebt) =>
     company.records.some(r => selectedCases.has(r.id)) && !isCompanySelected(company);
-
   const handleExport = () => {
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+      return;
+    }
+
+    if (selectedCases.size === 0) {
+      toast.error('Vui lòng chọn ít nhất một case để xuất');
+      return;
+    }
+
     // Build export data from selected cases
     const selectedCompanies: { clientName: string; records: AccountingRecord[]; totalDebt: number; totalPaid: number; endingBalance: number }[] = [];
-    
+
     companyDebts.forEach(company => {
       const selectedRecs = company.records.filter(r => selectedCases.has(r.id));
       if (selectedRecs.length === 0) return;
@@ -128,7 +139,20 @@ export default function AccountingDebtPage() {
       });
     });
 
+    if (selectedCompanies.length === 0) {
+      toast.error('Không có dữ liệu để xuất');
+      return;
+    }
+
     exportDebtToExcel(selectedCompanies);
+    toast.success(`Đã xuất Excel cho ${selectedCases.size} case`);
+    setIsSelectionMode(false);
+    setSelectedCases(new Set());
+  };
+
+  const cancelSelection = () => {
+    setIsSelectionMode(false);
+    setSelectedCases(new Set());
   };
 
   const companyDebts = useMemo(() => {
@@ -271,14 +295,27 @@ export default function AccountingDebtPage() {
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
-            {selectedCases.size > 0 && (
-              <Button onClick={handleExport} variant="outline" className="h-10">
-                <Download className="h-4 w-4 mr-1" /> Xuất Excel ({selectedCases.size} case)
-              </Button>
+            {isSelectionMode ? (
+              <>
+                <Button onClick={cancelSelection} variant="ghost" className="h-10 text-muted-foreground">
+                  Hủy
+                </Button>
+                <Button onClick={handleExport} className="h-10 bg-green-600 hover:bg-green-700">
+                  <Download className="h-4 w-4 mr-1" />
+                  Xác nhận Xuất ({selectedCases.size})
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={handleExport} variant="outline" className="h-10 border-primary/40 text-primary hover:bg-primary/5">
+                  <Download className="h-4 w-4 mr-1" />
+                  Xuất Excel
+                </Button>
+                <Button onClick={() => setAddOpen(true)} className="h-10">
+                  <Plus className="h-4 w-4 mr-1" /> Thêm công nợ
+                </Button>
+              </>
             )}
-            <Button onClick={() => setAddOpen(true)} className="h-10">
-              <Plus className="h-4 w-4 mr-1" /> Thêm công nợ
-            </Button>
           </div>
         </div>
 
@@ -289,7 +326,7 @@ export default function AccountingDebtPage() {
               <TableHeader>
                 <TableRow className="bg-muted/50">
                   <TableHead className="w-[40px]"></TableHead>
-                  <TableHead className="w-[40px]"></TableHead>
+                  {isSelectionMode && <TableHead className="w-[40px]"></TableHead>}
                   <TableHead className="min-w-[180px]">Khách hàng</TableHead>
                   <TableHead className="min-w-[80px] text-center">Số case</TableHead>
                   <TableHead className="min-w-[130px] text-right">Nợ phát sinh</TableHead>
@@ -318,12 +355,13 @@ export default function AccountingDebtPage() {
                       onToggleCompany={toggleCompany}
                       isCompanySelected={isCompanySelected(company)}
                       isCompanyPartial={isCompanyPartial(company)}
+                      isSelectionMode={isSelectionMode}
                     />
                   );
                 })}
                 {pagedDebts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={isSelectionMode ? 12 : 11} className="text-center py-8 text-muted-foreground">
                       Không tìm thấy dữ liệu công nợ
                     </TableCell>
                   </TableRow>
@@ -366,6 +404,7 @@ function CompanyDebtRow({
   onToggleCompany,
   isCompanySelected,
   isCompanyPartial,
+  isSelectionMode,
 }: {
   company: CompanyDebt;
   isExpanded: boolean;
@@ -377,6 +416,7 @@ function CompanyDebtRow({
   onToggleCompany: (company: CompanyDebt) => void;
   isCompanySelected: boolean;
   isCompanyPartial: boolean;
+  isSelectionMode: boolean;
 }) {
   return (
     <>
@@ -390,12 +430,14 @@ function CompanyDebtRow({
             : <ChevronRight className="h-4 w-4 text-muted-foreground mx-auto" />
           }
         </TableCell>
-        <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-          <Checkbox
-            checked={isCompanySelected ? true : isCompanyPartial ? 'indeterminate' : false}
-            onCheckedChange={() => onToggleCompany(company)}
-          />
-        </TableCell>
+        {isSelectionMode && (
+          <TableCell className="text-center" onClick={e => e.stopPropagation()}>
+            <Checkbox
+              checked={isCompanySelected ? true : isCompanyPartial ? 'indeterminate' : false}
+              onCheckedChange={() => onToggleCompany(company)}
+            />
+          </TableCell>
+        )}
         <TableCell className="font-semibold text-foreground">{company.clientName}</TableCell>
         <TableCell className="text-center">
           <Badge variant="secondary" className="text-xs">{company.records.length}</Badge>
@@ -420,6 +462,7 @@ function CompanyDebtRow({
           onEdit={onEdit}
           isSelected={selectedCases.has(r.id)}
           onToggle={() => onToggleCase(r.id)}
+          isSelectionMode={isSelectionMode}
         />
       ))}
     </>
@@ -432,12 +475,14 @@ function CaseDebtRow({
   onEdit,
   isSelected,
   onToggle,
+  isSelectionMode,
 }: {
   record: AccountingRecord;
   onUpdateNote: (id: string, note: string) => void;
   onEdit: (r: AccountingRecord, e: React.MouseEvent) => void;
   isSelected: boolean;
   onToggle: () => void;
+  isSelectionMode: boolean;
 }) {
   const vatAmount = computeAmountVAT(r);
   const paid = r.paymentAmount1 + r.paymentAmount2;
@@ -448,9 +493,11 @@ function CaseDebtRow({
   return (
     <TableRow className="bg-muted/20 text-xs border-l-2 border-l-primary/20">
       <TableCell></TableCell>
-      <TableCell className="text-center">
-        <Checkbox checked={isSelected} onCheckedChange={onToggle} />
-      </TableCell>
+      {isSelectionMode && (
+        <TableCell className="text-center">
+          <Checkbox checked={isSelected} onCheckedChange={onToggle} />
+        </TableCell>
+      )}
       <TableCell>
         <div className="pl-4 space-y-1">
           <div className="font-medium text-foreground">{r.jobTitle}</div>
