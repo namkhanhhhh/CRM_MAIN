@@ -33,7 +33,7 @@ const menuItems: MenuItem[] = [
     label: "Dashboard",
     children: [
       { label: "Overview", path: "/dashboard" },
-      { label: "Business Management", path: "/dashboard/candidate-management" },
+      { label: "Freelancer Management", path: "/dashboard/candidate-management" },
     ],
   },
   {
