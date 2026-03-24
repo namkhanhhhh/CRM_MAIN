@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Search, Edit2, Download, CalendarRange, RotateCcw, Eye } from 'lucide-react';
 import { mockAccountingRecords } from '@/data/accountingMockData';
 import { computeBDCommission, computeHHCommission } from '@/types/accounting';
@@ -27,6 +28,9 @@ interface StaffTarget {
   type: 'BD' | 'HH';
   kpi: number;
   bonusRate: number;
+  isLead?: boolean;
+  teamMembers?: string[];
+  teamBonusRate?: number;
 }
 
 export default function CommissionsPage() {
@@ -44,9 +48,19 @@ export default function CommissionsPage() {
     }
   });
 
+  const [hotBonuses, setHotBonuses] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('apex_hot_bonuses_v5');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
   useEffect(() => {
     localStorage.setItem('apex_staff_targets_v5', JSON.stringify(staffTargets));
-  }, [staffTargets]);
+    localStorage.setItem('apex_hot_bonuses_v5', JSON.stringify(hotBonuses));
+  }, [staffTargets, hotBonuses]);
 
   const [editStaff, setEditStaff] = useState<StaffTarget | null>(null);
   const [viewCasesStaff, setViewCasesStaff] = useState<{name: string, type: 'BD' | 'HH'} | null>(null);
@@ -78,6 +92,17 @@ export default function CommissionsPage() {
   }, [selectedMonths, isFiltered]);
 
 
+  const allStaffNames = useMemo(() => {
+    const names = new Set<string>();
+    mockAccountingRecords.forEach(r => {
+      if (r.overallStatus !== 'Reject') {
+        if (r.bdName) names.add(r.bdName);
+        if (r.ownerName) names.add(r.ownerName);
+      }
+    });
+    return Array.from(names).sort();
+  }, []);
+
   const staffData = useMemo(() => {
     const staffMap = new Map<string, {name: string, type: 'BD' | 'HH'}>();
     mockAccountingRecords.forEach(r => {
@@ -88,26 +113,42 @@ export default function CommissionsPage() {
     });
     
     const year = Number(selectedYear);
-    return Array.from(staffMap.values()).map(s => {
-      const target = staffTargets[s.name] || { name: s.name, type: s.type, kpi: 0, bonusRate: 0 };
+    const individualData = Array.from(staffMap.values()).map(s => {
+      const target = staffTargets[s.name] || { name: s.name, type: s.type, kpi: 0, bonusRate: 0, isLead: false, teamMembers: [], teamBonusRate: 0 };
       
-      const revenue = mockAccountingRecords
-        .filter(r => {
-          if (r.overallStatus === 'Reject') return false;
-          const dateStr = r.onboardDate || r.offerDate;
-          if (!dateStr) return false;
-          
-          const d = new Date(dateStr);
-          if (d.getFullYear() !== year) return false;
-          if (!selectedMonths.includes(d.getMonth())) return false;
-          
-          return s.type === 'BD' ? r.bdName === s.name : r.ownerName === s.name;
-        })
-        .reduce((sum, r) => sum + (s.type === 'BD' ? computeBDCommission(r) : computeHHCommission(r)), 0);
+      const cases = mockAccountingRecords.filter(r => {
+        if (r.overallStatus === 'Reject') return false;
+        const dateStr = r.onboardDate || r.offerDate;
+        if (!dateStr) return false;
+        
+        const d = new Date(dateStr);
+        if (d.getFullYear() !== year) return false;
+        if (!selectedMonths.includes(d.getMonth())) return false;
+        
+        return s.type === 'BD' ? r.bdName === s.name : r.ownerName === s.name;
+      });
 
+      const revenue = cases.reduce((sum, r) => sum + (s.type === 'BD' ? computeBDCommission(r) : computeHHCommission(r)), 0);
       const bonus = revenue > target.kpi ? (revenue - target.kpi) * (target.bonusRate / 100) : 0;
-      return { ...s, revenue, target, bonus };
-    }).sort((a, b) => b.revenue - a.revenue);
+      const doneCases = cases.filter(c => c.overallStatus === 'Done');
+      const offersCount = doneCases.length;
+      const hotBonus = doneCases.reduce((sum, c) => sum + (hotBonuses[c.id] || 0), 0);
+
+      return { ...s, target, revenue, bonus, offersCount, hotBonus };
+    });
+
+    return individualData.map(s => {
+      let teamRevenue = 0;
+      if (s.target.isLead && s.target.teamMembers) {
+        teamRevenue = individualData
+          .filter(x => s.target.teamMembers!.includes(x.name))
+          .reduce((sum, x) => sum + x.revenue, 0);
+      }
+      const teamBonus = teamRevenue * ((s.target.teamBonusRate || 0) / 100);
+      const totalCommission = s.bonus + teamBonus + s.hotBonus;
+
+      return { ...s, teamRevenue, teamBonus, totalCommission };
+    }).sort((a, b) => b.totalCommission - a.totalCommission);
   }, [selectedYear, selectedMonths, staffTargets]);
 
   const filtered = useMemo(() => {
@@ -235,11 +276,11 @@ export default function CommissionsPage() {
                 <TableRow className="bg-muted/50">
                   <TableHead className="w-[50px] text-center">#</TableHead>
                   <TableHead className="min-w-[150px] text-center">Nhân sự</TableHead>
-                  <TableHead className="min-w-[100px] text-center">Chức vụ</TableHead>
-                  <TableHead className="min-w-[150px] text-center">Doanh số cá nhân</TableHead>
-                  <TableHead className="min-w-[150px] text-center">KPI Cá nhân</TableHead>
-                  <TableHead className="min-w-[100px] text-center">Tỷ lệ (%)</TableHead>
-                  <TableHead className="min-w-[150px] text-center">Hoa hồng</TableHead>
+                  <TableHead className="min-w-[150px] text-center">Doanh số CN</TableHead>
+                  <TableHead className="min-w-[120px] text-center">Thưởng CN</TableHead>
+                  <TableHead className="min-w-[140px] text-center">Hoa hồng Team</TableHead>
+                  <TableHead className="min-w-[120px] text-center">Thưởng nóng</TableHead>
+                  <TableHead className="min-w-[150px] text-center font-bold text-primary">Tổng nhận</TableHead>
                   <TableHead className="w-[120px] text-center">Thao tác</TableHead>
                 </TableRow>
               </TableHeader>
@@ -247,22 +288,39 @@ export default function CommissionsPage() {
                 {filtered.map((s, idx) => (
                   <TableRow key={`${s.name}-${s.type}`}>
                     <TableCell className="font-medium text-center">{idx + 1}</TableCell>
-                    <TableCell className="font-semibold text-center">{s.name}</TableCell>
                     <TableCell className="text-center">
-                      <Badge variant="outline" className={s.type === 'BD' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-purple-600 bg-purple-50 border-purple-200'}>
-                        {s.type === 'BD' ? 'BD' : 'Headhunter'}
+                      <div className="font-semibold">{s.name}</div>
+                      <Badge variant="outline" className={`mt-1 ${s.type === 'BD' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-purple-600 bg-purple-50 border-purple-200'} ${s.target.isLead ? 'font-bold border-2' : ''}`}>
+                        {s.type === 'BD' ? 'BD' : 'Headhunter'}{s.target.isLead && ' Lead'}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-center font-medium">{formatVND(s.revenue)}</TableCell>
-                    <TableCell className="text-center text-muted-foreground">{formatVND(s.target.kpi)}</TableCell>
-                    <TableCell className="text-center text-muted-foreground">{s.target.bonusRate}%</TableCell>
-                    <TableCell className="text-center font-bold text-green-600">{formatVND(s.bonus)}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="font-medium text-slate-700">{formatVND(s.revenue)}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">KPI: {formatVND(s.target.kpi)}</div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="font-medium text-slate-700">{formatVND(s.bonus)}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{s.target.bonusRate}%</div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {s.target.isLead ? (
+                        <>
+                          <div className="font-medium text-slate-700">{formatVND(s.teamBonus)}</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">{s.target.teamBonusRate}% (DS: {formatVND(s.teamRevenue)})</div>
+                        </>
+                      ) : <span className="text-slate-300">-</span>}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="font-medium text-slate-700">{formatVND(s.hotBonus)}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{s.offersCount} case Done</div>
+                    </TableCell>
+                    <TableCell className="text-center font-bold text-green-600 text-[15px] bg-green-50/20">{formatVND(s.totalCommission)}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => setViewCasesStaff({name: s.name, type: s.type})} title="Xem chi tiết các case">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-primary hover:bg-primary/10" onClick={() => setViewCasesStaff({name: s.name, type: s.type})} title="Xem chi tiết các case">
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => setEditStaff(s.target)} title="Chỉnh sửa KPI">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:bg-slate-100" onClick={() => setEditStaff(s.target)} title="Chỉnh sửa cấu hình hoa hồng">
                           <Edit2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -283,34 +341,88 @@ export default function CommissionsPage() {
       </div>
 
       <Dialog open={!!editStaff} onOpenChange={o => !o && setEditStaff(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Cập nhật KPI & Tỷ lệ</DialogTitle>
+            <DialogTitle>Cấu hình Hoa hồng - {editStaff?.name}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Nhân sự</Label>
-              <Input value={editStaff?.name || ''} disabled className="bg-muted font-semibold text-primary" />
+          <div className="space-y-5 py-4 max-h-[70vh] overflow-y-auto px-1">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Nhân sự</Label>
+                <Input value={editStaff?.name || ''} disabled className="bg-muted font-semibold text-primary" />
+              </div>
+              <div className="space-y-2">
+                <Label>Chức vụ</Label>
+                <Input value={editStaff?.type === 'BD' ? 'BD' : 'Headhunter'} disabled className="bg-muted" />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Chức vụ</Label>
-              <Input value={editStaff?.type === 'BD' ? 'BD' : 'Headhunter'} disabled className="bg-muted" />
+
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
+              <h3 className="font-semibold text-sm text-slate-800">Cơ chế cá nhân</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>KPI Cá nhân (VNĐ)</Label>
+                  <Input 
+                    type="number" 
+                    value={editStaff?.kpi || 0} 
+                    onChange={e => setEditStaff(prev => prev ? {...prev, kpi: Number(e.target.value)} : null)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Tỷ lệ Hoa hồng cá nhân (%)</Label>
+                  <Input 
+                    type="number" 
+                    value={editStaff?.bonusRate || 0} 
+                    onChange={e => setEditStaff(prev => prev ? {...prev, bonusRate: Number(e.target.value)} : null)}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>KPI Cá nhân (VNĐ)</Label>
-              <Input 
-                type="number" 
-                value={editStaff?.kpi} 
-                onChange={e => setEditStaff(prev => prev ? {...prev, kpi: Number(e.target.value)} : null)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Tỷ lệ Hoa hồng (%)</Label>
-              <Input 
-                type="number" 
-                value={editStaff?.bonusRate} 
-                onChange={e => setEditStaff(prev => prev ? {...prev, bonusRate: Number(e.target.value)} : null)}
-              />
+
+            <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100 space-y-4">
+              <div className="flex items-center gap-2">
+                <Checkbox 
+                  id="isLead" 
+                  checked={editStaff?.isLead} 
+                  onCheckedChange={c => setEditStaff(prev => prev ? {...prev, isLead: !!c} : null)} 
+                />
+                <Label htmlFor="isLead" className="font-semibold text-sm cursor-pointer text-blue-900">Là Lead (Hưởng HH Team)</Label>
+              </div>
+
+              {editStaff?.isLead && (
+                <div className="space-y-4 pt-2">
+                  <div className="space-y-2">
+                    <Label>Tỷ lệ Hoa hồng Team (%)</Label>
+                    <Input 
+                      type="number" 
+                      value={editStaff?.teamBonusRate || 0} 
+                      onChange={e => setEditStaff(prev => prev ? {...prev, teamBonusRate: Number(e.target.value)} : null)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Chọn thành viên trong Team</Label>
+                    <div className="grid grid-cols-2 gap-2 border p-3 rounded bg-white max-h-40 overflow-y-auto">
+                      {allStaffNames.filter(n => n !== editStaff.name).map(n => (
+                        <div key={n} className="flex items-center gap-2">
+                          <Checkbox 
+                            id={`team-${n}`} 
+                            checked={editStaff.teamMembers?.includes(n)}
+                            onCheckedChange={c => {
+                              setEditStaff(prev => {
+                                if (!prev) return null;
+                                const cur = prev.teamMembers || [];
+                                const members = c ? [...cur, n] : cur.filter(x => x !== n);
+                                return { ...prev, teamMembers: members };
+                              });
+                            }}
+                          />
+                          <Label htmlFor={`team-${n}`} className="text-xs">{n}</Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -336,7 +448,8 @@ export default function CommissionsPage() {
                     <TableHead className="min-w-[150px] text-center">Vị trí</TableHead>
                     <TableHead className="min-w-[120px] text-center">Ứng viên</TableHead>
                     <TableHead className="min-w-[100px] text-center">Trạng thái</TableHead>
-                    <TableHead className="min-w-[120px] text-center">Hoa hồng ghi nhận</TableHead>
+                    <TableHead className="min-w-[120px] text-center">HH ghi nhận</TableHead>
+                    <TableHead className="min-w-[120px] text-center">Thưởng nóng</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -361,6 +474,19 @@ export default function CommissionsPage() {
                         </TableCell>
                         <TableCell className="text-center font-semibold text-primary">
                           {formatVND(commissionAmount)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {r.overallStatus === 'Done' ? (
+                            <Input
+                              type="number"
+                              value={hotBonuses[r.id] || ''}
+                              placeholder="0"
+                              onChange={e => setHotBonuses(p => ({ ...p, [r.id]: Number(e.target.value) }))}
+                              className="w-[100px] mx-auto h-8 text-center text-xs"
+                            />
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     );

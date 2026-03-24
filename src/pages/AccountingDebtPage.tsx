@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, ChevronDown, ChevronRight, ChevronLeft, StickyNote, FileText, Plus, Pencil, X, AlertTriangle, Download } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ChevronLeft, StickyNote, FileText, Plus, Pencil, X, AlertTriangle, Download, MoreHorizontal } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { mockAccountingRecords } from '@/data/accountingMockData';
 import {
@@ -43,47 +43,46 @@ function sameMonthYear(date: string | null, month: number, year: number): boolea
 function getMonthlyPayment(r: AccountingRecord, month: number, year: number): { 
   amount: number; 
   deadline: string | null; 
-  status: 'paid' | 'urgent' | 'warning' | 'normal' 
+  status: 'urgent' | 'warning' | 'normal' 
 } | null {
   const d1 = computePaymentDeadline1(r);
   const d2 = computePaymentDeadline2(r);
   const vatAmount = computeAmountVAT(r);
   const today = startOfDay(new Date());
 
-  let amount = 0;
+  let unpaidAmount = 0;
   let deadline: string | null = null;
-  let isPaidInMonth = true; // Assume true, set to false if any installment in this month is unpaid
   let hasInstallment = false;
 
-  const amt1 = r.paymentAmount1 || vatAmount * 0.5;
-  const amt2 = r.paymentAmount2 || vatAmount * 0.5;
+  const expected1 = vatAmount * 0.5;
+  const expected2 = vatAmount * 0.5;
 
   if (d1 && sameMonthYear(d1, month, year)) {
     hasInstallment = true;
-    amount += amt1;
-    deadline = d1;
-    if (!(r.paymentAmount1 > 0)) isPaidInMonth = false;
+    if ((r.paymentAmount1 || 0) < expected1) {
+      unpaidAmount += (expected1 - (r.paymentAmount1 || 0));
+      deadline = d1;
+    }
   }
   
   if (d2 && sameMonthYear(d2, month, year)) {
     hasInstallment = true;
-    amount += amt2;
-    if (!deadline || (d2 > deadline)) deadline = d2;
-    if (!(r.paymentAmount2 > 0)) isPaidInMonth = false;
+    if ((r.paymentAmount2 || 0) < expected2) {
+      unpaidAmount += (expected2 - (r.paymentAmount2 || 0));
+      if (!deadline || d2 > deadline) deadline = d2;
+    }
   }
 
-  if (!hasInstallment) return null;
+  if (!hasInstallment || unpaidAmount <= 0) return null;
 
-  let status: 'paid' | 'urgent' | 'warning' | 'normal' = 'normal';
-  if (isPaidInMonth) {
-    status = 'paid';
-  } else if (deadline) {
+  let status: 'urgent' | 'warning' | 'normal' = 'normal';
+  if (deadline) {
     const daysLeft = differenceInDays(parseISO(deadline), today);
-    if (daysLeft <= 1) status = 'urgent'; // Covers overdue, today, and tomorrow
+    if (daysLeft <= 1) status = 'urgent';
     else if (daysLeft <= 5) status = 'warning';
   }
 
-  return { amount, deadline, status };
+  return { amount: unpaidAmount, deadline, status };
 }
 
 const currentDate = new Date();
@@ -212,8 +211,8 @@ export default function AccountingDebtPage() {
     grouped.forEach((recs, clientName) => {
       const activeRecs = recs.filter(r => {
         const debt = computeAmountVAT(r);
-        const paid = r.paymentAmount1 + r.paymentAmount2;
-        return (debt - paid) !== 0;
+        const paid = (r.paymentAmount1 || 0) + (r.paymentAmount2 || 0);
+        return Math.round(debt - paid) > 0;
       });
       if (activeRecs.length === 0) return;
       const totalDebt = activeRecs.reduce((sum, r) => sum + computeAmountVAT(r), 0);
@@ -264,97 +263,99 @@ export default function AccountingDebtPage() {
 
   const resetMonths = () => setMonthCols(getDefault3Months());
 
-  // Total columns = 5 fixed + 2*3 monthly + 2 (note + edit) + selection
-  const colSpan = isSelectionMode ? (5 + monthCols.length * 2 + 2 + 1) : (5 + monthCols.length * 2 + 2);
+  // Total columns = 5 fixed + 2*3 monthly + 1 (action) + selection
+  const colSpan = isSelectionMode ? (5 + monthCols.length * 2 + 1 + 1) : (5 + monthCols.length * 2 + 1);
 
   return (
     <MainLayout>
       <div className="space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Công nợ</h1>
-            <p className="text-sm text-muted-foreground">{companyDebts.length} khách hàng</p>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center flex-wrap gap-6">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800">Công nợ</h1>
+              <p className="text-sm text-slate-500">{companyDebts.length} khách hàng</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="outline" className="text-sm py-1.5 px-3 bg-white border-slate-200">
+                <span className="text-slate-500 mr-1">Nợ phát sinh:</span>
+                <span className="font-bold text-slate-800">{formatVND(grandTotalDebt)}</span>
+              </Badge>
+              <Badge variant="outline" className="text-sm py-1.5 px-3 bg-green-50 border-green-200">
+                <span className="text-slate-500 mr-1">Đã TT:</span>
+                <span className="font-bold text-green-700">{formatVND(grandTotalPaid)}</span>
+              </Badge>
+              <Badge variant="outline" className="text-sm py-1.5 px-3 border-red-200 bg-red-50 text-red-600">
+                <span className="text-slate-500 mr-1">Dư cuối kỳ:</span>
+                <span className="font-bold">{formatVND(grandEndingBalance)}</span>
+              </Badge>
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="text-sm py-1.5 px-3">
-              <span className="text-muted-foreground mr-1">Nợ phát sinh:</span>
-              <span className="font-semibold">{formatVND(grandTotalDebt)} ₫</span>
-            </Badge>
-            <Badge variant="outline" className="text-sm py-1.5 px-3 border-green-300">
-              <span className="text-muted-foreground mr-1">Đã TT:</span>
-              <span className="font-semibold text-green-600">{formatVND(grandTotalPaid)} ₫</span>
-            </Badge>
-            <Badge variant="outline" className="text-sm py-1.5 px-3 border-destructive/40 text-destructive">
-              <span className="text-muted-foreground mr-1">Dư cuối kỳ:</span>
-              <span className="font-bold">{formatVND(grandEndingBalance)} ₫</span>
-            </Badge>
+          
+          <div className="flex items-center gap-3">
+            {isSelectionMode ? (
+              <>
+                <Button onClick={cancelSelection} variant="ghost" className="h-10 text-slate-500 text-sm font-semibold">Hủy</Button>
+                <Button onClick={handleExport} className="h-10 bg-green-600 hover:bg-green-700 text-sm font-semibold shadow-sm px-4">
+                  <Download className="h-4 w-4 mr-2" /> Xác nhận Xuất ({selectedCases.size})
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={handleExport} variant="outline" className="h-10 border-pink-200 text-pink-700 hover:bg-pink-50 text-sm font-semibold shadow-sm px-5 bg-white rounded-full transition-all">
+                  <Download className="h-4 w-4 mr-2" /> Xuất Excel
+                </Button>
+                <Button onClick={() => setAddOpen(true)} className="h-10 text-sm font-semibold shadow-sm px-5 bg-pink-600 hover:bg-pink-700 text-white rounded-full transition-all">
+                  <Plus className="h-4 w-4 mr-2" /> Thêm công nợ
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
         {/* Filters row */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <div className="flex items-center gap-4 flex-wrap my-2">
+          <div className="relative flex-1 min-w-[300px] max-w-lg group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-pink-400 group-focus-within:text-pink-600 transition-colors" />
             <Input
               placeholder="Tìm khách hàng, vị trí, nhân viên..."
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
-              className="pl-9"
+              className="pl-11 h-11 text-sm shadow-sm border-pink-100 bg-pink-50/50 rounded-full focus-visible:ring-pink-500 transition-all"
             />
           </div>
 
           {/* Month pickers for 3 columns */}
-          <div className="flex items-center gap-2 flex-wrap rounded-lg">
-            <span className="text-xs text-muted-foreground font-medium">Lọc theo tháng:</span>
+          <div className="flex items-center gap-2 flex-wrap rounded-full bg-white border border-pink-100 shadow-sm p-1.5">
+            <span className="text-sm text-pink-600 font-semibold px-3">Lọc theo tháng:</span>
             {monthCols.map((mc, idx) => (
-              <div key={idx} className="flex items-center gap-1 border rounded-md px-2 py-1 bg-muted/20">
+              <div key={idx} className="flex items-center gap-1.5 border border-pink-100 rounded-full px-4 bg-pink-50/50 h-9 transition-colors hover:border-pink-300">
                 <Select value={String(mc.month)} onValueChange={v => updateMonthCol(idx, 'month', Number(v))}>
-                  <SelectTrigger className="h-6 w-[80px] border-0 bg-transparent shadow-none p-0 text-xs font-semibold text-primary">
+                  <SelectTrigger className="h-full w-[80px] border-0 bg-transparent shadow-none p-0 text-sm font-bold text-pink-700 focus:ring-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {MONTHS_LIST.map(m => (
-                      <SelectItem key={m.value} value={String(m.value)} className="text-xs">{m.label}</SelectItem>
+                      <SelectItem key={m.value} value={String(m.value)} className="text-sm">{m.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <span className="text-xs text-muted-foreground">/</span>
+                <span className="text-sm text-pink-300 font-medium">/</span>
                 <Select value={String(mc.year)} onValueChange={v => updateMonthCol(idx, 'year', Number(v))}>
-                  <SelectTrigger className="h-6 w-[60px] border-0 bg-transparent shadow-none p-0 text-xs">
+                  <SelectTrigger className="h-full w-[60px] border-0 bg-transparent shadow-none p-0 text-sm font-semibold text-slate-700 focus:ring-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {YEARS.map(y => (
-                      <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+                      <SelectItem key={y} value={String(y)} className="text-sm">{y}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             ))}
-            <Button variant="ghost" size="sm" onClick={resetMonths} className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground">
+            <Button variant="ghost" onClick={resetMonths} className="h-9 px-4 text-xs font-semibold text-pink-600 hover:text-pink-800 hover:bg-pink-100 rounded-full ml-1 transition-all">
               <X className="h-3.5 w-3.5 mr-1" /> Mặc định
             </Button>
-          </div>
-
-          <div className="flex items-center gap-2 ml-auto">
-            {isSelectionMode ? (
-              <>
-                <Button onClick={cancelSelection} variant="ghost" className="h-9 text-muted-foreground">Hủy</Button>
-                <Button onClick={handleExport} className="h-9 bg-green-600 hover:bg-green-700">
-                  <Download className="h-4 w-4 mr-1" /> Xác nhận Xuất ({selectedCases.size})
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button onClick={handleExport} variant="outline" className="h-9 border-primary/40 text-primary hover:bg-primary/5">
-                  <Download className="h-4 w-4 mr-1" /> Xuất Excel
-                </Button>
-                <Button onClick={() => setAddOpen(true)} className="h-9">
-                  <Plus className="h-4 w-4 mr-1" /> Thêm công nợ
-                </Button>
-              </>
-            )}
           </div>
         </div>
 
@@ -364,39 +365,40 @@ export default function AccountingDebtPage() {
             <Table>
               <TableHeader>
                 {/* Row 1: Group header "Dự kiến thu công nợ theo tháng" */}
-                <TableRow className="bg-muted/50 border-b-0">
+                <TableRow className="bg-pink-100/80 hover:bg-pink-100/80 border-b border-pink-200">
                   {/* empty cells for fixed columns */}
-                  <TableHead className="w-[50px] border-r" rowSpan={2}></TableHead>
-                  {isSelectionMode && <TableHead className="w-[40px] border-r" rowSpan={2}></TableHead>}
-                  <TableHead className="min-w-[180px] border-r" rowSpan={2}>
-                    <span className="font-semibold text-foreground">Khách hàng</span>
+                  <TableHead className="w-[32px] border-r border-pink-200" rowSpan={2}></TableHead>
+                  {isSelectionMode && <TableHead className="w-[40px] border-r border-pink-200" rowSpan={2}></TableHead>}
+                  <TableHead className="min-w-[180px] border-r border-pink-200 text-pink-900" rowSpan={2}>
+                    <span className="font-bold text-[13px]">Tên khách hàng</span>
                   </TableHead>
-                  <TableHead className="w-[70px] text-center border-r" rowSpan={2}>
-                    <span className="font-semibold text-foreground">Số case</span>
+                  <TableHead className="w-[80px] text-center border-r border-pink-200 text-pink-900" rowSpan={2}>
+                    <span className="font-bold text-[13px]">Số case</span>
                   </TableHead>
-                  <TableHead className="min-w-[120px] text-right border-r" rowSpan={2}>
-                    <span className="font-semibold text-foreground">Nợ phát sinh</span>
+                  <TableHead className="min-w-[130px] text-right border-r border-pink-200 text-pink-900" rowSpan={2}>
+                    <span className="font-bold text-[13px]">Nợ phát sinh</span>
                   </TableHead>
                   {/* Monthly group spanning */}
                   <TableHead
                     colSpan={monthCols.length * 2}
-                    className="text-center border-l border-r border-b font-bold text-xs py-2 uppercase tracking-wide text-primary bg-primary/5"
+                    className="text-center border-l border-r border-b border-pink-200 font-bold text-[14px] py-3 text-pink-900"
                   >
                     Dự kiến thu công nợ theo tháng
                   </TableHead>
-                  <TableHead className="w-[50px] text-center border-l" rowSpan={2}></TableHead>
-                  <TableHead className="w-[50px] text-center" rowSpan={2}></TableHead>
+                  <TableHead className="w-[48px] text-center border-l border-pink-200 text-pink-900" rowSpan={2}>
+                    <span className="font-bold text-[13px] block">Trạng thái</span>
+                  </TableHead>
                 </TableRow>
                 {/* Row 2: Per-month sub-headers */}
-                <TableRow className="bg-muted/50">
+                <TableRow className="bg-pink-50/60 hover:bg-pink-50/60">
                   {monthCols.map((mc, idx) => (
                     <React.Fragment key={idx}>
-                      <TableHead className={cn("min-w-[110px] text-center border-l border-b", idx === 0 && "border-l-2")}>
-                        <div className="font-semibold text-xs mb-0.5 whitespace-nowrap">Tháng {mc.month}/{mc.year}</div>
-                        <div className="text-[10px] font-medium text-muted-foreground">Số tiền</div>
+                      <TableHead className={cn("min-w-[110px] text-center border-l border-b border-pink-200", idx === 0 && "border-l-2")}>
+                        <div className="font-bold text-pink-800 text-[13px] mb-0.5 whitespace-nowrap">Tháng {mc.month}/{mc.year}</div>
+                        <div className="text-[11px] font-semibold text-pink-600/80 mt-1">Số tiền</div>
                       </TableHead>
-                      <TableHead className="min-w-[110px] text-center border-r border-b">
-                        <div className="text-[10px] font-medium text-muted-foreground mt-4">Ngày đến hạn dự kiến</div>
+                      <TableHead className="min-w-[110px] text-center border-r border-b border-pink-200">
+                        <div className="text-[11px] font-semibold text-pink-600/80 mt-5">Ngày đến hạn dự kiến</div>
                       </TableHead>
                     </React.Fragment>
                   ))}
@@ -427,23 +429,21 @@ export default function AccountingDebtPage() {
 
                 {/* TỔNG row */}
                 {pagedDebts.length > 0 && (
-                  <TableRow className="bg-muted font-bold">
+                  <TableRow className="bg-pink-100/60 font-bold border-t border-pink-200 hover:bg-pink-100/60">
                     <TableCell></TableCell>
                     {isSelectionMode && <TableCell></TableCell>}
-                    <TableCell className="font-semibold text-foreground uppercase text-xs">Tổng cộng</TableCell>
-                    <TableCell></TableCell>
-                    <TableCell className="text-right font-bold text-sm">
-                      {formatVND(grandTotalDebt)} ₫
+                    <TableCell className="font-bold text-pink-900 uppercase text-[13px] text-center" colSpan={2}>TỔNG</TableCell>
+                    <TableCell className="text-right font-bold text-sm text-pink-900">
+                      {formatVND(grandTotalDebt)}
                     </TableCell>
                     {monthCols.map((_mc, idx) => (
                       <React.Fragment key={idx}>
-                        <TableCell className="text-center font-bold text-sm border-l">
+                        <TableCell className="text-center font-bold text-sm border-l border-pink-200 text-pink-900">
                           {monthlyTotals[idx] > 0 ? formatVND(monthlyTotals[idx]) : ''}
                         </TableCell>
-                        <TableCell className="border-r"></TableCell>
+                        <TableCell className="border-r border-pink-200"></TableCell>
                       </React.Fragment>
                     ))}
-                    <TableCell></TableCell>
                     <TableCell></TableCell>
                   </TableRow>
                 )}
@@ -513,39 +513,42 @@ function CompanyDebtRow({
   return (
     <>
       <TableRow
-        className="cursor-pointer hover:bg-muted/60 transition-colors font-medium"
+        className="cursor-pointer bg-pink-50/30 hover:bg-pink-50/60 transition-colors border-y border-pink-100"
         onClick={onToggle}
       >
-        <TableCell className="text-center">
+        <TableCell className="text-center w-[32px] border-r border-pink-100">
           {isExpanded
-            ? <ChevronDown className="h-4 w-4 text-muted-foreground mx-auto" />
-            : <ChevronRight className="h-4 w-4 text-muted-foreground mx-auto" />
+            ? <ChevronDown className="h-4 w-4 text-pink-500 mx-auto" />
+            : <ChevronRight className="h-4 w-4 text-pink-400 mx-auto" />
           }
         </TableCell>
         {isSelectionMode && (
-          <TableCell className="text-center" onClick={e => e.stopPropagation()}>
+          <TableCell className="text-center w-[40px] border-r border-pink-100" onClick={e => e.stopPropagation()}>
             <Checkbox
               checked={isCompanySelected ? true : isCompanyPartial ? 'indeterminate' : false}
               onCheckedChange={() => onToggleCompany(company)}
             />
           </TableCell>
         )}
-        <TableCell className="font-semibold text-foreground">{company.clientName}</TableCell>
-        <TableCell className="text-center">
-          <Badge variant="secondary" className="text-xs">{company.records.length}</Badge>
+        <TableCell className="font-bold text-pink-900/90 text-[14px] italic border-r border-pink-100">
+          {company.clientName}
         </TableCell>
-        <TableCell className="text-right font-medium">{formatVND(company.totalDebt)} ₫</TableCell>
+        <TableCell className="text-center border-r border-pink-100">
+          <span className="text-[13px] font-medium text-pink-800/80">{company.records.length}</span>
+        </TableCell>
+        <TableCell className="text-right border-r border-pink-100">
+          <span className="font-bold text-pink-800">{formatVND(company.totalDebt)}</span>
+        </TableCell>
         {monthCols.map((mc, idx) => (
           <React.Fragment key={idx}>
-            <TableCell className="text-center border-l">
+            <TableCell className="text-center border-l border-pink-100">
               {companyMonthlyTotals[idx] > 0
-                ? <span className="font-semibold text-primary">{formatVND(companyMonthlyTotals[idx])}</span>
+                ? <span className="font-bold text-red-500/90">{formatVND(companyMonthlyTotals[idx])}</span>
                 : null}
             </TableCell>
-            <TableCell className="border-r"></TableCell>
+            <TableCell className="border-r border-pink-100"></TableCell>
           </React.Fragment>
         ))}
-        <TableCell></TableCell>
         <TableCell></TableCell>
       </TableRow>
 
@@ -581,106 +584,94 @@ function CaseDebtRow({
   const balance = vatAmount - paid;
 
   return (
-    <TableRow className="bg-muted/20 text-xs border-l-2 border-l-primary/20">
-      <TableCell></TableCell>
+    <TableRow className="bg-white hover:bg-slate-50 transition-colors text-[13px] border-b border-slate-100 border-l border-l-transparent">
+      <TableCell className="w-[32px] border-r border-slate-200"></TableCell>
       {isSelectionMode && (
-        <TableCell className="text-center">
+        <TableCell className="text-center w-[40px] border-r border-slate-200">
           <Checkbox checked={isSelected} onCheckedChange={onToggle} />
         </TableCell>
       )}
-      <TableCell>
-        <div className="pl-4 py-1">
-          <div className="font-semibold text-foreground text-xs uppercase leading-tight">{r.jobTitle}</div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold border border-primary/20">
-              UV: {r.candidateName}
-            </span>
-            <span className="text-muted-foreground text-[10px]">Onboard: {formatDate(r.onboardDate)}</span>
-          </div>
+      <TableCell className="border-r border-slate-200 py-2.5 px-3">
+        <div className="flex flex-col gap-1">
+          <div className="text-slate-800">{r.jobTitle}</div>
         </div>
       </TableCell>
-      <TableCell></TableCell>
-      <TableCell className={`text-right font-semibold ${balance > 0 ? 'text-destructive' : 'text-green-600'}`}>
-        {formatVND(balance)} ₫
+      <TableCell className="border-r border-slate-200 py-2.5 px-3 text-center">
+        <div className="text-slate-800">{r.candidateName}</div>
+      </TableCell>
+      <TableCell className={`text-right border-r border-slate-200 py-2.5 px-3 font-medium ${balance > 0 ? 'text-red-600' : 'text-slate-800'}`}>
+        {formatVND(balance)}
       </TableCell>
       {monthCols.map((mc, idx) => {
         const mp = getMonthlyPayment(r, mc.month, mc.year);
         if (!mp) return (
           <React.Fragment key={idx}>
-            <TableCell className="border-l"></TableCell>
-            <TableCell className="border-r bg-muted/5"></TableCell>
+            <TableCell className="border-l border-slate-200 py-2.5 px-3"></TableCell>
+            <TableCell className="border-r border-slate-200 py-2.5 px-3"></TableCell>
           </React.Fragment>
         );
 
         const { amount, deadline, status } = mp;
 
+        let bgColorClass = "bg-transparent";
+        if (status === 'urgent') bgColorClass = "bg-red-100/50";
+        if (status === 'warning') bgColorClass = "bg-yellow-100/50";
+
         return (
           <React.Fragment key={idx}>
-            <TableCell className={cn(
-               "text-center border-l",
-               status === 'paid' && "bg-green-50/50"
-            )}>
+            <TableCell className={`text-center border-l border-slate-200 py-2.5 px-3 ${bgColorClass}`}>
               <span className={cn(
-                "font-medium",
-                status === 'paid' ? "text-green-600" : 
-                status === 'urgent' ? "text-destructive font-bold" :
-                status === 'warning' ? "text-yellow-600 font-bold" : "text-foreground"
+                "font-semibold",
+                status === 'urgent' ? "text-red-700" :
+                status === 'warning' ? "text-yellow-700" : "text-slate-700"
               )}>
                 {formatVND(amount)}
               </span>
             </TableCell>
-            <TableCell className={cn(
-              "text-center border-r",
-              status === 'paid' ? "bg-green-50/50" : "bg-muted/5"
-            )}>
-              <div className="flex flex-col items-center">
-                <span className={cn(
-                  "text-xs font-bold leading-none",
-                  status === 'paid' ? "text-green-600" :
-                  status === 'urgent' ? "text-destructive" :
-                  status === 'warning' ? "text-yellow-600" : "text-slate-600"
-                )}>
-                  {deadline}
-                </span>
-                {status === 'paid' ? (
-                  <span className="text-[8px] font-bold uppercase text-green-600 mt-1 px-1 bg-green-100 rounded">Đã trả</span>
-                ) : status === 'urgent' ? (
-                  <span className="text-[8px] font-bold uppercase text-destructive mt-1 px-1 bg-red-100 rounded">Quá hạn/Sắp hạn</span>
-                ) : status === 'warning' ? (
-                  <span className="text-[8px] font-bold uppercase text-amber-600 mt-1 px-1 bg-yellow-100 rounded">Gần hạn</span>
-                ) : null}
-              </div>
+            <TableCell className={`text-center border-r border-slate-200 py-2.5 px-3 ${bgColorClass}`}>
+              <span className={cn(
+                "font-medium",
+                status === 'urgent' ? "text-red-700" :
+                status === 'warning' ? "text-yellow-700" : "text-slate-600"
+              )}>
+                {formatDate(deadline)}
+              </span>
             </TableCell>
           </React.Fragment>
         );
       })}
-      <TableCell className="text-center">
+      <TableCell className="text-center w-[48px]">
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 relative">
-              <StickyNote className={`h-3.5 w-3.5 ${r.note ? 'text-amber-500' : 'text-muted-foreground'}`} />
-              {r.note && <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />}
+            <Button variant="ghost" size="icon" className="h-8 w-8 relative hover:bg-slate-200">
+              <MoreHorizontal className="h-4 w-4 text-slate-600" />
+              {r.note && <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 border border-white" />}
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-64 p-3" onClick={e => e.stopPropagation()}>
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-sm font-medium">
-                <FileText className="h-3.5 w-3.5" /> Ghi chú
+          <PopoverContent className="w-64 p-3" align="end" onClick={e => e.stopPropagation()}>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                  <Pencil className="h-3.5 w-3.5 text-blue-600" /> Chỉnh sửa
+                </div>
+                <Button variant="outline" size="sm" className="w-full text-xs" onClick={e => onEdit(r, e)}>
+                  Mở form sửa chi tiết
+                </Button>
               </div>
-              <Textarea
-                placeholder="Nhập ghi chú..."
-                value={r.note || ''}
-                onChange={e => onUpdateNote(r.id, e.target.value)}
-                className="text-xs min-h-[60px] resize-none"
-              />
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
+                  <FileText className="h-3.5 w-3.5 text-amber-500" /> Ghi chú nhanh
+                </div>
+                <Textarea
+                  placeholder="Nhập ghi chú..."
+                  value={r.note || ''}
+                  onChange={e => onUpdateNote(r.id, e.target.value)}
+                  className="text-xs min-h-[60px] resize-none"
+                />
+              </div>
             </div>
           </PopoverContent>
         </Popover>
-      </TableCell>
-      <TableCell className="text-center">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => onEdit(r, e)}>
-          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
       </TableCell>
     </TableRow>
   );
