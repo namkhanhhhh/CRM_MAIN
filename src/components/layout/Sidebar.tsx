@@ -16,6 +16,7 @@ import {
   ChevronRight,
   User,
   Receipt,
+  Globe2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,6 +85,14 @@ const menuItems: MenuItem[] = [
     icon: UserCog,
     label: "Users",
     children: [{ label: "User List", path: "/users" }],
+  },
+  {
+    icon: Globe2,
+    label: "Trang cá nhân",
+    children: [
+      { label: "Quản lý trang", path: "/headhunter/profile" },
+      { label: "Quản lý Jobs", path: "/headhunter/jobs" },
+    ],
   },
   { icon: Calendar, label: "Calendar", path: "/calendar" },
   { icon: Bell, label: "Notifications", path: "/notifications", badge: 3 },

@@ -24,6 +24,9 @@ import AccountingDataPage from "@/pages/AccountingDataPage";
 import AccountingDebtPage from "@/pages/AccountingDebtPage";
 import AccountingDashboardPage from "@/pages/AccountingDashboardPage";
 import CommissionsPage from "@/pages/CommissionsPage";
+import HeadhunterProfilePage from "@/pages/HeadhunterProfilePage";
+import HeadhunterJobsPage from "@/pages/HeadhunterJobsPage";
+import HeadhunterLandingPage from "@/pages/HeadhunterLandingPage";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -57,6 +60,11 @@ const App = () => (
               <Route path="/sales/debt" element={<AccountingDebtPage />} />
               <Route path="/sales/dashboard" element={<AccountingDashboardPage />} />
               <Route path="/sales/commissions" element={<CommissionsPage />} />
+              {/* Headhunter Personal Page (Admin) */}
+              <Route path="/headhunter/profile" element={<HeadhunterProfilePage />} />
+              <Route path="/headhunter/jobs" element={<HeadhunterJobsPage />} />
+              {/* Headhunter Landing Page (Public) */}
+              <Route path="/headhunter/:slug" element={<HeadhunterLandingPage />} />
               {/* Candidate Apply Page (Public) */}
               <Route path="/apply/:headhunterSlug/:jobCode" element={<CandidateApplyPage />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
@@ -70,3 +78,5 @@ const App = () => (
 );
 
 export default App;
+
+

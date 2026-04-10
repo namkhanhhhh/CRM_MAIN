@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,7 +24,8 @@ import {
   Send,
   AlertCircle,
 } from 'lucide-react';
-import { getOpenJobByCode, getHeadhunterById } from '@/data/openJobMockData';
+import { getOpenJobByCode } from '@/data/openJobMockData';
+import { mockHeadhunterProfiles } from '@/data/headhunterProfileMockData';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_FILE_TYPES = [
@@ -37,6 +38,8 @@ export default function CandidateApplyPage() {
   const { headhunterSlug, jobCode } = useParams<{ headhunterSlug: string; jobCode: string }>();
   const { toast } = useToast();
   
+  const location = useLocation();
+  
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -48,6 +51,14 @@ export default function CandidateApplyPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  useEffect(() => {
+    if (location.hash === '#apply-form') {
+      setTimeout(() => {
+        document.getElementById('apply-form')?.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    }
+  }, [location.hash]);
+
   // Find job by code
   const job = useMemo(() => {
     if (!jobCode) return null;
@@ -56,16 +67,10 @@ export default function CandidateApplyPage() {
 
   // Find headhunter - in real app, lookup by slug
   const headhunter = useMemo(() => {
-    // Mock: map slug to headhunter
-    const slugToId: Record<string, string> = {
-      'nguyenvana': 'hh-1',
-      'tranthib': 'hh-2',
-      'levanc': 'hh-3',
-      'phamthid': 'hh-4',
-      'hoangvane': 'hh-5',
-    };
-    const hhId = slugToId[headhunterSlug || ''];
-    return hhId ? getHeadhunterById(hhId) : null;
+    if (!headhunterSlug) return null;
+    return mockHeadhunterProfiles.find(
+      p => p.slug === headhunterSlug || p.slug.replace(/-/g, '') === headhunterSlug
+    ) || null;
   }, [headhunterSlug]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
